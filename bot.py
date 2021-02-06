@@ -41,6 +41,7 @@ YTDL_OPTIONS = {
 }
 
 FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn'
 }
 
@@ -108,13 +109,21 @@ async def play(ctx, url):
         return await ctx.send('`You need to be in a voice channel to use this command!`')
 
     voice_channel = ctx.author.voice.channel
-    await voice_channel.connect()
+    
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+    if voice_client is None:
+        voice_client = await voice_channel.connect()
 
-    voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+    #voice = get(bot.voice_clients, guild=ctx.guild)
 
     async with ctx.typing():
-        player = await YTDLSource.from_url(url, loop=bot.loop)
-        voice.play(player, after=lambda e: print('Player error: %s' %e) if e else None )
+        player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+        #with youtube_dl.YoutubeDL(YTDL_OPTIONS) as ydl:
+        #    info = ydl.extract_info(url, download=False)
+        #    URL = info['formats'][0]['url']
+        voice_client.play(player, after=lambda e: print('Player error: %s' %e) if e else None )
+        #voice_client.play(discord.FFmpegPCMAudio(URL))
+
     
     await ctx.send('**Now playing:** {}'.format(player.title))
 
