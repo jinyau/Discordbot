@@ -3,17 +3,22 @@ import discord
 import random
 import re
 import unidecode
+import asyncio
+import ffmpeg
 import youtube_dl
 from discord.utils import get
 from discord import FFmpegPCMAudio
 from youtube_dl import YoutubeDL
 from dotenv import load_dotenv
-from discord.ext import commands
+from discord.ext import commands, tasks
+from discord.voice_client import VoiceClient
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
 #GUILD = os.getenv('DISCORD_GUILD')
+
+youtube_dl.utils.bug_reports_message = lambda: ''
 
 intents = discord.Intents.default()
 
@@ -21,16 +26,46 @@ bot = commands.Bot(command_prefix = '!', intents=intents)
 
 banned_words = ['boruto', 'ボルト', 'ぼると', 'b0ruto', 'b0rut0', 'borut0', 'ボuルzaトmaki', 'oturob', 'bouzarumatoki', '8oruto', '80ruto', '8orut0', '80rut0']
 
-YDL_OPTIONS = {
-        'format': 'bestaudio',
-        'noplaylist':'True'
-    }
+YTDL_OPTIONS = {
+    'format': 'bestaudio/best',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0'
+}
 
 FFMPEG_OPTIONS = {
-        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-        'options': '-vn'
-    }
+    'options': '-vn'
+}
 
+ytdl = youtube_dl.YoutubeDL(YTDL_OPTIONS)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+
+        self.data = data
+
+        self.title = data.get('title')
+        self.url = data.get('url')
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=False):
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+
+        if 'entries' in data:
+            # take first item from a playlist
+            data = data['entries'][0]
+
+        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
 
 @bot.event
 async def on_ready():
@@ -67,36 +102,59 @@ async def fk_aundre(ctx):
 
 
 @bot.command(name='play')
-async def play(ctx):
-    voice_channel = ctx.author.voice.channel
+async def play(ctx, url):
+    voice_state = ctx.author.voice
+    if voice_state is None:
+        return await ctx.send('`You need to be in a voice channel to use this command!`')
 
+    voice_channel = ctx.author.voice.channel
+    await voice_channel.connect()
+
+    voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+
+    async with ctx.typing():
+        player = await YTDLSource.from_url(url, loop=bot.loop)
+        voice.play(player, after=lambda e: print('Player error: %s' %e) if e else None )
+    
+    await ctx.send('**Now playing:** {}'.format(player.title))
 
 @bot.command(name='leave')
 async def leave(ctx):
-    voice = get(bot.voice_clients, guild=ctx.guild)
-    if voice.is_connected():
-        await voice.disconnect()
+    voice_state = ctx.author.voice
+    if voice_state is None:
+        return await ctx.send('`You need to be in a voice channel to use this command!`')
+
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+    if voice_client.is_connected():
+        await voice_client.disconnect()
     else:
         await ctx.send("The bot is not connected to a voice channel.")
 
 
 @bot.command(name='pause')
 async def pause(ctx):
-    voice = get(bot.voice_clients, guild=ctx.guild)
-    if voice.is_playing():
-        voice.pause()
+    voice_state = ctx.author.voice
+    if voice_state is None:
+        return await ctx.send('`You need to be in a voice channel to use this command!`')
+
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+    if voice_client.is_playing():
+        voice_client.pause()
     else:
         await ctx.send('Audio is already paused.')
 
 
 @bot.command(name='resume')
-async def resume(ctx)
-    voice = get(bot.voice_clients, guild=ctx.guild)
-    if voice.is_paused():
-        voice.resume()
+async def resume(ctx):
+    voice_state = ctx.author.voice
+    if voice_state is None:
+        return await ctx.send('`You need to be in a voice channel to use this command!`')
+
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+    if voice_client.is_paused():
+        voice_client.resume()
     else:
         await ctx.send('Audio is not paused.')
-
 
 
 def parse_message(message):
