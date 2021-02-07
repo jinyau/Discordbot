@@ -49,6 +49,8 @@ ytdl = youtube_dl.YoutubeDL(YTDL_OPTIONS)
 
 music_queue = []
 
+song_name_queue = []
+
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
@@ -120,6 +122,7 @@ async def play(ctx, url):
 
     async with ctx.typing():
         player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+        song_name_queue.append(player.title)
         music_queue.append(player)
         if not voice_client.is_playing():
             voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
@@ -177,16 +180,38 @@ async def resume(ctx):
         await ctx.send('Audio is not paused.')
 
 
+@bot.command(name='skip')
+async def skip(ctx):
+    voice_state = ctx.author.voice
+    if voice_state is None:
+        return await ctx.send('`You need to be in a voice channel to use this command!`')
+
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+
+    if voice_client.is_playing():
+        voice_client.stop()
+        del song_name_queue[0]
+        del music_queue[0]
+        voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
+    else:
+        await ctx.send('Nothing is queued.')
+
+
+@bot.command(name='queue')
+async def queue(ctx):
+    await ctx.send('Queue:\n' + '\n'.join(song_name_queue))
+
 def parse_message(message):
     #parsed_message = message.content.replace('-','').replace(' ', '').replace(':','').replace(';','').replace('/','').replace('~','').replace('・','').replace('.','').replace(',','').replace('♡','')
     stripped_accent = unidecode.unidecode(message.content)
     parsed_message = re.sub('[^A-Za-z0-9ぁ-ゔァ-ヴー]+', '', stripped_accent)
     return parsed_message
     
-async def play_next(ctx):
+def play_next(ctx):
     voice_client = get(bot.voice_clients, guild=ctx.guild)
     if len(music_queue) > 1:
         del music_queue[0]
+        del song_name_queue[0]
         voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
         voice_client.is_playing()
 
