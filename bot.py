@@ -47,6 +47,8 @@ FFMPEG_OPTIONS = {
 
 ytdl = youtube_dl.YoutubeDL(YTDL_OPTIONS)
 
+music_queue = []
+
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
@@ -118,14 +120,23 @@ async def play(ctx, url):
 
     async with ctx.typing():
         player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+        music_queue.append(player)
+        if not voice_client.is_playing():
+            voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
+            await ctx.send('**Now playing:** {}'.format(player.title))
+            voice_client.is_playing()
+
+        else:
+            await ctx.send('**Queueing:** {}'.format(player.title))
+            
         #with youtube_dl.YoutubeDL(YTDL_OPTIONS) as ydl:
         #    info = ydl.extract_info(url, download=False)
         #    URL = info['formats'][0]['url']
-        voice_client.play(player, after=lambda e: print('Player error: %s' %e) if e else None )
+        #voice_client.play(player, after=lambda e: print('Player error: %s' %e) if e else None )
         #voice_client.play(discord.FFmpegPCMAudio(URL))
 
     
-    await ctx.send('**Now playing:** {}'.format(player.title))
+        #await ctx.send('**Now playing:** {}'.format(player.title))
 
 @bot.command(name='leave')
 async def leave(ctx):
@@ -172,6 +183,12 @@ def parse_message(message):
     parsed_message = re.sub('[^A-Za-z0-9ぁ-ゔァ-ヴー]+', '', stripped_accent)
     return parsed_message
     
+async def play_next(ctx):
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+    if len(music_queue) > 1:
+        del music_queue[0]
+        voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
+        voice_client.is_playing()
 
 bot.run(TOKEN)
 
