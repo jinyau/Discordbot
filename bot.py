@@ -190,9 +190,10 @@ async def skip(ctx):
 
     if voice_client.is_playing():
         voice_client.stop()
-        del song_name_queue[0]
-        del music_queue[0]
-        voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
+        #del song_name_queue[0]
+        #del music_queue[0]
+        #voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
+        #play_next(ctx)
     else:
         await ctx.send('Nothing is queued.')
 
