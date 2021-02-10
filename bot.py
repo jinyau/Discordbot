@@ -106,13 +106,17 @@ async def fk_aundre(ctx):
     await ctx.send(response)
 
 
-@bot.command(name='play')
+@bot.command(name='play', aliases = ['p'])
 async def play(ctx, url):
     voice_state = ctx.author.voice
     if voice_state is None:
         return await ctx.send('`You need to be in a voice channel to use this command!`')
 
+    if url is None:
+        return await ctx.send('No url or search query.')
+
     voice_channel = ctx.author.voice.channel
+
     
     voice_client = get(bot.voice_clients, guild=ctx.guild)
     if voice_client is None:
@@ -201,6 +205,40 @@ async def skip(ctx):
 @bot.command(name='queue')
 async def queue(ctx):
     await ctx.send('Queue:\n' + '\n'.join(song_name_queue))
+
+@bot.command(name='clear')
+async def clear (ctx):
+    global music_queue
+    global song_name_queue
+    voice_state = ctx.author.voice
+    if voice_state is None:
+         return await ctx.send('`You need to be in a voice channel to use this command!`')
+
+    music_queue = []
+    song_name_queue = []
+    await ctx.send('Queue is cleared.')
+
+
+@bot.command(name='stop')
+async def stop(ctx):
+    global music_queue
+    global song_name_queue
+    voice_state = ctx.author.voice
+    if voice_state is None:
+         return await ctx.send('`You need to be in a voice channel to use this command!`')
+    
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
+
+    if voice_client.is_playing():
+        voice_client.stop()
+        music_queue = []
+        song_name_queue = []
+        await ctx.send('Bot is stopped and queue is cleared.')
+
+    else:
+        await ctx.send('No music is playing.')
+
+     
 
 def parse_message(message):
     #parsed_message = message.content.replace('-','').replace(' ', '').replace(':','').replace(';','').replace('/','').replace('~','').replace('・','').replace('.','').replace(',','').replace('♡','')
