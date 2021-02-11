@@ -107,7 +107,7 @@ async def fk_aundre(ctx):
 
 
 @bot.command(name='play', aliases = ['p'])
-async def play(ctx, url):
+async def play(ctx, url: str=None):
     voice_state = ctx.author.voice
     if voice_state is None:
         return await ctx.send('`You need to be in a voice channel to use this command!`')
