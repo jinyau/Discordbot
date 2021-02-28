@@ -1,7 +1,7 @@
 # Discordbot
-## Personal Discord bot written in Python. Wrote the bot to practice python.
+## Personal Discord bot written in Python. 
 
-Hosted on an AWS linux server.
+Hosted on an AWS linux server. Wrote the bot to practice python.
 
 ## Features and Commands
 
@@ -15,7 +15,7 @@ Hosted on an AWS linux server.
     - !leave - leave the voice channel
 2. Danbooru - fetch a random image from danbooru with a search tag
     - !danbooru - search a random image from danbooru with !danbooru '*tag*'
-3. Miscanlleous 
+3. Miscellaneous 
     - !aundre - a command to tease my friend
     - deletes any mention of the word 'boruto'.
 
