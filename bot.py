@@ -12,6 +12,8 @@ from youtube_dl import YoutubeDL
 from dotenv import load_dotenv
 from discord.ext import commands, tasks
 from discord.voice_client import VoiceClient
+from pybooru import Danbooru
+
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -105,9 +107,21 @@ async def fk_aundre(ctx):
     response = aundre_winter
     await ctx.send(response)
 
+@bot.command(name='danbooru', aliases = ['anime'])
+async def get_anime(ctx, tag: str = None):
+    if tag is None:
+        return await ctx.send('Enter a tag')
+
+    client = Danbooru('danbooru')
+    get_image = client.post_list(**{'limit':1, 'page':1, 'tags':tag, 'random': True})
+    for image in get_image:
+        response = image['large_file_url']
+
+    await ctx.send(response)
+
 
 @bot.command(name='play', aliases = ['p'])
-async def play(ctx, url: str=None):
+async def play(ctx, *, url: str=None):
     voice_state = ctx.author.voice
     if voice_state is None:
         return await ctx.send('`You need to be in a voice channel to use this command!`')
@@ -117,7 +131,6 @@ async def play(ctx, url: str=None):
 
     voice_channel = ctx.author.voice.channel
 
-    
     voice_client = get(bot.voice_clients, guild=ctx.guild)
     if voice_client is None:
         voice_client = await voice_channel.connect()
