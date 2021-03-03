@@ -6,6 +6,8 @@ import unidecode
 import asyncio
 import ffmpeg
 import youtube_dl
+import matplotlib.pyplot as plt
+import pandas as pd
 from discord.utils import get
 from discord import FFmpegPCMAudio
 from youtube_dl import YoutubeDL
@@ -13,6 +15,8 @@ from dotenv import load_dotenv
 from discord.ext import commands, tasks
 from discord.voice_client import VoiceClient
 from pybooru import Danbooru
+from pandas_datareader import data
+from datetime import datetime, date, time, timedelta
 
 
 load_dotenv()
@@ -251,7 +255,41 @@ async def stop(ctx):
     else:
         await ctx.send('No music is playing.')
 
-     
+
+@bot.command(name='stock')
+async def stock(ctx, ticker: str = None):
+    if ticker is None:
+        return await ctx.send('Enter a ticker.')
+
+    tickers = [ticker.upper()]
+    start_date = (datetime.today() - timedelta(weeks=52)).strftime('%Y-%m-%d')
+    end_date = datetime.today().strftime('%Y-%m-%d')
+    panel_data = data.DataReader(tickers , 'yahoo', start_date, end_date)
+
+
+    close_stocks = panel_data['Close']
+    all_weekdays = pd.date_range(start=start_date, end=end_date, freq='B')
+    close_stocks = close_stocks.reindex(all_weekdays)
+    close_stocks = close_stocks.fillna(method='ffill')
+
+    timeseries = close_stocks.loc[:, ticker.upper()]
+    short_rolling = timeseries.rolling(window=30).mean()
+    long_rolling = timeseries.rolling(window=90).mean()
+
+    fig, ax = plt.subplots(figsize=(16,9))
+    plt.grid(True)
+    ax.plot(timeseries.index, timeseries, label=ticker.upper())
+    ax.plot(short_rolling.index, short_rolling, label='30 days rolling')
+    ax.plot(long_rolling.index, long_rolling, label='90 days rolling')
+
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Adjusted closing price ($)')
+    ax.legend()
+
+    plt.savefig(fname='stock')
+    await ctx.send(file=discord.File('stock.png'))
+    os.remove('stock.png')
+
 
 def parse_message(message):
     #parsed_message = message.content.replace('-','').replace(' ', '').replace(':','').replace(';','').replace('/','').replace('~','').replace('・','').replace('.','').replace(',','').replace('♡','')

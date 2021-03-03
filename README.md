@@ -17,6 +17,7 @@ Hosted on an AWS linux server. Wrote the bot to practice python.
     - !danbooru - search a random image from danbooru with !danbooru '*tag*'
 3. Miscellaneous 
     - !aundre - a command to tease my friend
+    - !stock - Look up a stock with its ticker name. Displays final adjusted call from a 1 year period. !stock 'ticker'
     - deletes any mention of the word 'boruto'.
 
 
