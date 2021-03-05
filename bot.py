@@ -53,7 +53,11 @@ FFMPEG_OPTIONS = {
 
 ytdl = youtube_dl.YoutubeDL(YTDL_OPTIONS)
 
+global music_queue 
+
 music_queue = []
+
+global song_name_queue 
 
 song_name_queue = []
 
