@@ -116,7 +116,7 @@ async def fk_aundre(ctx):
     await ctx.send(response)
 
 @bot.command(name='danbooru', aliases = ['anime'])
-async def get_anime(ctx, tag: str = None):
+async def get_anime(ctx, *, tag: str=None):
     if tag is None:
         return await ctx.send('Enter a tag')
 
