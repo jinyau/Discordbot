@@ -36,7 +36,7 @@ YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
-    'noplaylist': True,
+    'noplaylist': False,
     'nocheckcertificate': True,
     'ignoreerrors': False,
     'logtostderr': False,
@@ -76,11 +76,16 @@ class YTDLSource(discord.PCMVolumeTransformer):
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
 
         if 'entries' in data:
-            # take first item from a playlist
-            data = data['entries'][0]
-
-        filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
+            for i in data['entries']:
+                URL = i['formats'][0]['url']
+                player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
+                music_queue.append(player)
+                song_name_queue.append(i['title'])
+        else:
+            URL = data['url'] 
+            player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
+            music_queue.append(player)
+            song_name_queue.append(player.title)
 
 @bot.event
 async def on_ready():
@@ -146,16 +151,15 @@ async def play(ctx, *, url: str=None):
     #voice = get(bot.voice_clients, guild=ctx.guild)
 
     async with ctx.typing():
-        player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-        song_name_queue.append(player.title)
-        music_queue.append(player)
+        await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+
         if not voice_client.is_playing():
             voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
-            await ctx.send('**Now playing:** {}'.format(player.title))
+            await ctx.send('**Now playing:** {}'.format(song_name_queue[0]))
             voice_client.is_playing()
 
         else:
-            await ctx.send('**Queueing:** {}'.format(player.title))
+            await ctx.send('**Queueing:** {}'.format(song_name_queue[-1]))
             
         #with youtube_dl.YoutubeDL(YTDL_OPTIONS) as ydl:
         #    info = ydl.extract_info(url, download=False)
