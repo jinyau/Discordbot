@@ -8,6 +8,9 @@ import ffmpeg
 import youtube_dl
 import matplotlib.pyplot as plt
 import pandas as pd
+import sqlite3
+import aiomangadexapi
+import asyncio
 from discord.utils import get
 from discord import FFmpegPCMAudio
 from youtube_dl import YoutubeDL
@@ -87,9 +90,24 @@ class YTDLSource(discord.PCMVolumeTransformer):
             music_queue.append(player)
             song_name_queue.append(player.title)
 
+
+async def get_manga(mangadex_link):
+    try:
+        session = await aiomangadexapi.login(username='MANGADEX_USERNAME',password='MANGADEX_PASSWORD') # we login into mangadex
+        updates = await aiomangadexapi.search(session,mangadex_link,True) # get the updates
+    except Exception:
+        pass
+    else:
+        await session.close()
+        return updates
+    await session.close()
+    return None
+
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!\n')
+    manga_update.start()
 
 
 @bot.event
@@ -119,6 +137,7 @@ async def fk_aundre(ctx):
     aundre_winter = 'I am Aundre Winter and my opinions are the worst in the world.'
     response = aundre_winter
     await ctx.send(response)
+
 
 @bot.command(name='danbooru', aliases = ['anime'])
 async def get_anime(ctx, *, tag: str=None):
@@ -231,6 +250,7 @@ async def skip(ctx):
 async def queue(ctx):
     await ctx.send('Queue:\n' + '\n'.join(song_name_queue))
 
+
 @bot.command(name='clear')
 async def clear (ctx):
     global music_queue
@@ -297,6 +317,80 @@ async def stock(ctx, ticker: str = None):
     plt.savefig(fname='stock')
     await ctx.send(file=discord.File('stock.png'))
     os.remove('stock.png')
+
+
+@bot.command(name='mangalist')
+async def manga_list(ctx):
+    manga_list = []
+    
+    conn = sqlite3.connect('manga.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM manga")
+    rows = c.fetchall()
+    for row in rows:
+        revised_string = '[' + row[1] + ']' + '(' + row[0] + ')'
+        manga_list.append(revised_string)
+    conn.close()
+
+    embed = discord.Embed(title='Manga List', description=('\n'.join(manga_list)))
+
+    await ctx.send(embed=embed)
+
+
+
+@bot.command(name='addmanga')
+async def add_manga(ctx, url: str=None):
+    if url is None:
+        return await ctx.send('No link.')
+    
+    if 'https://mangadex.org/title/' not in url:
+        return await ctx.send('Not a mangadex title link.')
+
+    conn = sqlite3.connect('manga.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM manga where link=(?)",(url,))
+    row = c.fetchone()
+
+    if row is not None:
+        return await ctx.send("Manga is already in the database.")
+    
+    manga = await get_manga(url)  
+    
+    channel = bot.get_channel(803141544101281836)
+
+    if manga is not None:
+        for stuff in manga:
+            c.execute("INSERT INTO manga VALUES (?,?,?,?)",(url, stuff['title'], stuff['chapters'], stuff['image']))
+            embed = discord.Embed(title='Manga Added', description=stuff['title']+' '+str(stuff['chapters']))
+            embed.add_field(name='Link', value=stuff['latest'])
+            embed.set_image(url=stuff['image'])
+            await channel.send(embed=embed)
+
+            conn.commit()
+
+    conn.close()
+
+    
+
+@tasks.loop(minutes=30)
+async def manga_update():
+    channel = bot.get_channel('CHANNEL_ID2')
+    conn = sqlite3.connect('manga.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM manga")
+    rows = c.fetchall()
+    for row in rows:
+        manga = await get_manga(row[0])
+        if manga is not None:
+            for stuff in manga:
+                if stuff['chapters'] > row[2]:
+                    embed = discord.Embed(title='New Chapter', description=row[1]+' '+str(stuff['chapters']))
+                    embed.add_field(name='Link', value=stuff['latest'])
+                    embed.set_image(url=stuff['image'])
+                    await channel.send(embed=embed)
+                    c.execute("UPDATE manga SET chapter = (?) WHERE link = (?) ", (stuff['chapters'],row[0]))
+                    print(row)
+                    conn.commit()
 
 
 def parse_message(message):
