@@ -21,10 +21,12 @@ from pybooru import Danbooru
 from pandas_datareader import data
 from datetime import datetime, date, time, timedelta
 
-
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
+CHANNEL_ID2 = os.getenv('CHANNEL_ID2')
+MANGADEX_USERNAME = os.getenv('MANGADEX_USERNAME')
+MANGADEX_PASSWORD = os.getenv('MANGADEX_PASSWORD')
 #GUILD = os.getenv('DISCORD_GUILD')
 
 youtube_dl.utils.bug_reports_message = lambda: ''
@@ -93,7 +95,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
 async def get_manga(mangadex_link):
     try:
-        session = await aiomangadexapi.login(username='MANGADEX_USERNAME',password='MANGADEX_PASSWORD') # we login into mangadex
+        session = await aiomangadexapi.login(username=MANGADEX_USERNAME,password=MANGADEX_PASSWORD) # we login into mangadex
         updates = await aiomangadexapi.search(session,mangadex_link,True) # get the updates
     except Exception:
         pass
@@ -118,12 +120,26 @@ async def on_message(message):
     get_message = parse_message(message)
 
     if any(x in get_message.lower() for x in banned_words):
-        channel = bot.get_channel(CHANNEL_ID)
+        channel = bot.get_channel(int(CHANNEL_ID))
         await message.delete() 
         response = 'Deleted from ' + message.author.name + ' in ' + message.channel.name + ':\n' + message.content
         await channel.send(content=response)
 
     await bot.process_commands(message)
+
+
+@bot.event
+async def on_message_edit(before, after):
+    if after.author == bot.user:
+        return
+    
+    edited_message = parse_message(after)
+
+    if any(x in edited_message.lower() for x in banned_words):
+        channel = bot.get_channel(int(CHANNEL_ID))
+        await after.delete() 
+        response = 'Deleted from ' + after.author.name + ' in ' + after.channel.name + ':\n' + after.content
+        await channel.send(content=response)
 
 
 @bot.event 
@@ -163,6 +179,7 @@ async def play(ctx, *, url: str=None):
 
     voice_channel = ctx.author.voice.channel
 
+    
     voice_client = get(bot.voice_clients, guild=ctx.guild)
     if voice_client is None:
         voice_client = await voice_channel.connect()
@@ -188,6 +205,7 @@ async def play(ctx, *, url: str=None):
 
     
         #await ctx.send('**Now playing:** {}'.format(player.title))
+
 
 @bot.command(name='leave')
 async def leave(ctx):
@@ -322,7 +340,6 @@ async def stock(ctx, ticker: str = None):
 @bot.command(name='mangalist')
 async def manga_list(ctx):
     manga_list = []
-    
     conn = sqlite3.connect('manga.db')
     c = conn.cursor()
     c.execute("SELECT * FROM manga")
@@ -335,7 +352,6 @@ async def manga_list(ctx):
     embed = discord.Embed(title='Manga List', description=('\n'.join(manga_list)))
 
     await ctx.send(embed=embed)
-
 
 
 @bot.command(name='addmanga')
@@ -356,25 +372,22 @@ async def add_manga(ctx, url: str=None):
     
     manga = await get_manga(url)  
     
-    channel = bot.get_channel(803141544101281836)
-
     if manga is not None:
         for stuff in manga:
             c.execute("INSERT INTO manga VALUES (?,?,?,?)",(url, stuff['title'], stuff['chapters'], stuff['image']))
             embed = discord.Embed(title='Manga Added', description=stuff['title']+' '+str(stuff['chapters']))
             embed.add_field(name='Link', value=stuff['latest'])
             embed.set_image(url=stuff['image'])
-            await channel.send(embed=embed)
+            await ctx.send(embed=embed)
 
             conn.commit()
 
     conn.close()
 
-    
 
-@tasks.loop(minutes=30)
+@tasks.loop(minutes=60)
 async def manga_update():
-    channel = bot.get_channel('CHANNEL_ID2')
+    channel = bot.get_channel(int(CHANNEL_ID2))
     conn = sqlite3.connect('manga.db')
     c = conn.cursor()
     c.execute("SELECT * FROM manga")
@@ -388,9 +401,13 @@ async def manga_update():
                     embed.add_field(name='Link', value=stuff['latest'])
                     embed.set_image(url=stuff['image'])
                     await channel.send(embed=embed)
-                    c.execute("UPDATE manga SET chapter = (?) WHERE link = (?) ", (stuff['chapters'],row[0]))
-                    print(row)
+                    c.execute("UPDATE manga SET chapter = (?) WHERE link = (?) ",(stuff['chapters'],row[0]))
+                    await channel.send(stuff['title'] + ' ' + str(stuff['chapters']))
                     conn.commit()
+        else:
+            print('mangadex api error')
+
+    conn.close()
 
 
 def parse_message(message):
@@ -399,6 +416,7 @@ def parse_message(message):
     parsed_message = re.sub('[^A-Za-z0-9ぁ-ゔァ-ヴー]+', '', stripped_accent)
     return parsed_message
     
+
 def play_next(ctx):
     voice_client = get(bot.voice_clients, guild=ctx.guild)
     if len(music_queue) > 1:
@@ -406,6 +424,7 @@ def play_next(ctx):
         del song_name_queue[0]
         voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
         voice_client.is_playing()
+
 
 bot.run(TOKEN)
 
