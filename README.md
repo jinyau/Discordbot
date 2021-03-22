@@ -13,6 +13,7 @@ Hosted on an AWS linux server. Wrote the bot to practice python.
     - !clear - clears the queue 
     - !stop - clears the queue and stops the music
     - !leave - leave the voice channel
+    - !move - move the specify index up to the front of the queue
 2. Danbooru - fetch a random image from danbooru with a search tag
     - !danbooru - search a random image from danbooru with !danbooru '*tag*'
 3. Manga Update Tracker - add mangadex links to a sqlite database to track updates using an api wrapper for the mangadex api. If there is an update for a manga, send an embeded message to the main channel of my server.

@@ -49,7 +49,7 @@ YTDL_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0'
+    'source_address': '0.0.0.0',
 }
 
 FFMPEG_OPTIONS = {
@@ -276,7 +276,28 @@ async def skip(ctx):
 
 @bot.command(name='queue')
 async def queue(ctx):
-    await ctx.send('Queue:\n' + '\n'.join(song_name_queue))
+    nums = map(str, range(1, len(song_name_queue)+1))
+    output = "\n".join((x+'.  '+y) for x,y in zip(nums, song_name_queue))
+    await ctx.send('Queue:\n' + output)
+
+
+@bot.command(name='move')
+async def move(ctx, number:int=None):
+    voice_state = ctx.author.voice
+    if voice_state is None:
+        return await ctx.send('`You need to be in a voice channel to use this command!`')
+
+    if number is None:
+        return await ctx.send('No position enter.')
+
+    if number>len(song_name_queue):
+        return await ctx.send('Out of bounds.')
+
+    song_name = song_name_queue[number-1]
+    song_name_queue.insert(1, song_name_queue.pop(number-1))
+    music_queue.insert(1, music_queue.pop(number-1))
+    response = song_name + ' was moved to the front of queue.'
+    return await ctx.send(response)
 
 
 @bot.command(name='clear')
