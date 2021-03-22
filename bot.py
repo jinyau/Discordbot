@@ -11,6 +11,7 @@ import pandas as pd
 import sqlite3
 import aiomangadexapi
 import asyncio
+import json
 from discord.utils import get
 from discord import FFmpegPCMAudio
 from youtube_dl import YoutubeDL
@@ -79,19 +80,24 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, url, *, loop=None, stream=False):
         loop = loop or asyncio.get_event_loop()
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
-
+        count = 1
         if 'entries' in data:
             for i in data['entries']:
                 URL = i['formats'][0]['url']
                 player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
                 music_queue.append(player)
                 song_name_queue.append(i['title'])
+            try:
+                count = data['entries'][0]['n_entries']
+            except:
+                print('no count')
+            return count
         else:
             URL = data['url'] 
             player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
             music_queue.append(player)
             song_name_queue.append(player.title)
-
+            return count
 
 async def get_manga(mangadex_link):
     try:
@@ -109,7 +115,7 @@ async def get_manga(mangadex_link):
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!\n')
-    manga_update.start()
+    #manga_update.start()
 
 
 @bot.event
@@ -187,13 +193,17 @@ async def play(ctx, *, url: str=None):
     #voice = get(bot.voice_clients, guild=ctx.guild)
 
     async with ctx.typing():
-        await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+        count = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
 
         if not voice_client.is_playing():
             voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
+            if count>1:
+                await ctx.send('**Queueing:** {}'.format(count) + ' songs')
             await ctx.send('**Now playing:** {}'.format(song_name_queue[0]))
             voice_client.is_playing()
 
+        elif count>1:
+            await ctx.send('**Queueing:** {}'.format(count) + ' songs')
         else:
             await ctx.send('**Queueing:** {}'.format(song_name_queue[-1]))
             
@@ -424,6 +434,7 @@ def play_next(ctx):
         del song_name_queue[0]
         voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
         voice_client.is_playing()
+        asyncio.run_coroutine_threadsafe(ctx.send('**Now playing:** {}'.format(song_name_queue[0])), bot.loop)
 
 
 bot.run(TOKEN)
