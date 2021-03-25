@@ -12,6 +12,8 @@ import sqlite3
 import aiomangadexapi
 import asyncio
 import json
+import time as t
+from datetime import datetime
 from discord.utils import get
 from discord import FFmpegPCMAudio
 from youtube_dl import YoutubeDL
@@ -52,12 +54,28 @@ YTDL_OPTIONS = {
     'source_address': '0.0.0.0',
 }
 
+YTDL_OPTIONS_2 = {
+    'format': 'bestaudio/best',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0',
+}
+
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn'
 }
 
 ytdl = youtube_dl.YoutubeDL(YTDL_OPTIONS)
+
+ytdl2 = youtube_dl.YoutubeDL(YTDL_OPTIONS_2)
 
 global music_queue 
 
@@ -77,26 +95,47 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.url = data.get('url')
 
     @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
+    async def from_url(cls, voice, ctx, url, *, loop=None, stream=False):
         loop = loop or asyncio.get_event_loop()
+
+        MUSIC_FLAG = False
+
+        if not voice.is_playing():
+            data1 = await loop.run_in_executor(None, lambda: ytdl2.extract_info(url, download=not stream))
+            if 'entries' in data1:
+                data1 = data1['entries'][0]
+            URL = data1['url'] 
+            player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data1)
+            music_queue.append(player)
+            song_name_queue.append(player.title)
+            MUSIC_FLAG = True
+            voice.play(music_queue[0], after=lambda e: play_next(ctx))
+            await ctx.send('**Now playing:** {}'.format(song_name_queue[0]))
+
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
         count = 1
+
         if 'entries' in data:
             for i in data['entries']:
                 URL = i['formats'][0]['url']
                 player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
                 music_queue.append(player)
                 song_name_queue.append(i['title'])
+                if MUSIC_FLAG:
+                    MUSIC_FLAG = False
+                    music_queue.pop()
+                    song_name_queue.pop()
             try:
                 count = data['entries'][0]['n_entries']
             except:
                 print('no count')
             return count
         else:
-            URL = data['url'] 
-            player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
-            music_queue.append(player)
-            song_name_queue.append(player.title)
+            if not MUSIC_FLAG:
+                URL = data['url'] 
+                player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
+                music_queue.append(player)
+                song_name_queue.append(player.title)
             return count
 
 async def get_manga(mangadex_link):
@@ -193,15 +232,13 @@ async def play(ctx, *, url: str=None):
     #voice = get(bot.voice_clients, guild=ctx.guild)
 
     async with ctx.typing():
-        count = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-
+        count = await YTDLSource.from_url(voice_client, ctx, url, loop=bot.loop, stream=True)
+        
         if not voice_client.is_playing():
-            voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
             if count>1:
                 await ctx.send('**Queueing:** {}'.format(count) + ' songs')
             await ctx.send('**Now playing:** {}'.format(song_name_queue[0]))
             voice_client.is_playing()
-
         elif count>1:
             await ctx.send('**Queueing:** {}'.format(count) + ' songs')
         else:
@@ -284,6 +321,7 @@ async def queue(ctx):
 @bot.command(name='move')
 async def move(ctx, number:int=None):
     voice_state = ctx.author.voice
+
     if voice_state is None:
         return await ctx.send('`You need to be in a voice channel to use this command!`')
 
@@ -449,13 +487,19 @@ def parse_message(message):
     
 
 def play_next(ctx):
-    voice_client = get(bot.voice_clients, guild=ctx.guild)
+    voice_client = get(bot.voice_clients, guild=ctx.guild)        
+    del music_queue[0]
+    del song_name_queue[0]
+
     if len(music_queue) > 1:
-        del music_queue[0]
-        del song_name_queue[0]
         voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
         voice_client.is_playing()
         asyncio.run_coroutine_threadsafe(ctx.send('**Now playing:** {}'.format(song_name_queue[0])), bot.loop)
+    else:
+        t.sleep(90)
+        if not voice_client.is_playing():
+            asyncio.run_coroutine_threadsafe(voice_client.disconnect(), bot.loop)
+            asyncio.run_coroutine_threadsafe(ctx.send("Bot has been inactive. Disconnecting from voice."), bot.loop)
 
 
 bot.run(TOKEN)
