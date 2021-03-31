@@ -11,9 +11,7 @@ import pandas as pd
 import sqlite3
 import aiomangadexapi
 import asyncio
-import json
 import time as t
-from datetime import datetime
 from discord.utils import get
 from discord import FFmpegPCMAudio
 from youtube_dl import YoutubeDL
@@ -51,7 +49,7 @@ YTDL_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0',
+    'source_address': '0.0.0.0'
 }
 
 YTDL_OPTIONS_2 = {
@@ -85,6 +83,8 @@ global song_name_queue
 
 song_name_queue = []
 
+pending_tasks = dict()
+
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
@@ -97,7 +97,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_url(cls, voice, ctx, url, *, loop=None, stream=False):
         loop = loop or asyncio.get_event_loop()
-
+        
         MUSIC_FLAG = False
 
         if not voice.is_playing():
@@ -113,10 +113,16 @@ class YTDLSource(discord.PCMVolumeTransformer):
             await ctx.send('**Now playing:** {}'.format(song_name_queue[0]))
 
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+
         count = 1
 
         if 'entries' in data:
+            if(data['entries'][0]['n_entries'] is not None):
+                count = data['entries'][0]['n_entries']
+                if(count == 1 and MUSIC_FLAG):
+                    return 0
             for i in data['entries']:
+                example = i
                 URL = i['formats'][0]['url']
                 player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
                 music_queue.append(player)
@@ -125,10 +131,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
                     MUSIC_FLAG = False
                     music_queue.pop()
                     song_name_queue.pop()
-            try:
-                count = data['entries'][0]['n_entries']
-            except:
-                print('no count')
+            if(count ==1):
+                return -1
             return count
         else:
             if not MUSIC_FLAG:
@@ -136,7 +140,9 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
                 music_queue.append(player)
                 song_name_queue.append(player.title)
+                return -1
             return count
+
 
 async def get_manga(mangadex_link):
     try:
@@ -189,8 +195,9 @@ async def on_message_edit(before, after):
 
 @bot.event 
 async def on_reaction_add(reaction, user):
-    if reaction.message.author == user:
-        await reaction.remove(user)
+    if reaction.message.author != bot.user:
+        if reaction.message.author == user:
+            await reaction.remove(user)
 
 
 @bot.command(name='Aundre', aliases = ['AW', 'aundre', 'aw'])
@@ -233,15 +240,16 @@ async def play(ctx, *, url: str=None):
 
     async with ctx.typing():
         count = await YTDLSource.from_url(voice_client, ctx, url, loop=bot.loop, stream=True)
-        
+
         if not voice_client.is_playing():
+            voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
             if count>1:
                 await ctx.send('**Queueing:** {}'.format(count) + ' songs')
             await ctx.send('**Now playing:** {}'.format(song_name_queue[0]))
-            voice_client.is_playing()
-        elif count>1:
+
+        if count>1:
             await ctx.send('**Queueing:** {}'.format(count) + ' songs')
-        else:
+        elif count == -1:
             await ctx.send('**Queueing:** {}'.format(song_name_queue[-1]))
             
         #with youtube_dl.YoutubeDL(YTDL_OPTIONS) as ydl:
@@ -313,15 +321,65 @@ async def skip(ctx):
 
 @bot.command(name='queue')
 async def queue(ctx):
+    queue_list = []
+    embed_list = []
+    n = 15
+    count = 1
     nums = map(str, range(1, len(song_name_queue)+1))
-    output = "\n".join((x+'.  '+y) for x,y in zip(nums, song_name_queue))
-    await ctx.send('Queue:\n' + output)
+    # output = "\n".join((x+'. '+y) for x,y in zip(nums, song_name_queue))
+    for x,y in zip(nums, song_name_queue):
+        output = x+'. '+y
+        queue_list.append(output)
+    for i in range(0, len(queue_list), n):
+        embed = discord.Embed(title='Music Queue '  + str(count) , description=('\n'.join(queue_list[i:i + n])))
+        embed_list.append(embed)
+        count = count + 1
+    if len(embed_list) == 1:
+        return await ctx.send(embed=embed_list[0])
+    else:
+        message = await ctx.send(embed=embed_list[0])
+        await message.add_reaction('◀')
+        await message.add_reaction('▶')
+
+        def check(reaction, user):
+            return user == ctx.author
+
+        i = 0
+        reaction = None
+
+        while True:
+            if str(reaction) == '◀':
+                if i > 0:
+                    i -= 1
+                    await message.edit(embed = embed_list[i])
+                elif i == 0:
+                    i = len(embed_list) - 1
+                    await message.edit(embed = embed_list[-1])
+            elif str(reaction) == '▶':
+                if i < len(embed_list) - 1 :
+                    i += 1
+                    await message.edit(embed = embed_list[i])
+                elif i == len(embed_list) - 1:
+                    i = 0
+                    await message.edit(embed = embed_list[0])
+            
+            try:
+                if ctx.author in pending_tasks:
+                    pending_tasks[ctx.author].close()
+                pending_tasks[ctx.author] = bot.wait_for('reaction_add', timeout=60.0, check=check)
+                reaction, user =  await pending_tasks[ctx.author]
+                await message.remove_reaction(reaction, user)
+
+            except:
+                break
+        
+        await message.clear_reactions()
+
 
 
 @bot.command(name='move')
 async def move(ctx, number:int=None):
     voice_state = ctx.author.voice
-
     if voice_state is None:
         return await ctx.send('`You need to be in a voice channel to use this command!`')
 
@@ -362,9 +420,10 @@ async def stop(ctx):
     voice_client = get(bot.voice_clients, guild=ctx.guild)
 
     if voice_client.is_playing():
-        voice_client.stop()
         music_queue = []
         song_name_queue = []
+        voice_client.stop()
+
         await ctx.send('Bot is stopped and queue is cleared.')
 
     else:
@@ -409,6 +468,9 @@ async def stock(ctx, ticker: str = None):
 @bot.command(name='mangalist')
 async def manga_list(ctx):
     manga_list = []
+    embed_list = []
+    n = 15
+    count = 1
     conn = sqlite3.connect('manga.db')
     c = conn.cursor()
     c.execute("SELECT * FROM manga")
@@ -417,10 +479,48 @@ async def manga_list(ctx):
         revised_string = '[' + row[1] + ']' + '(' + row[0] + ')'
         manga_list.append(revised_string)
     conn.close()
+    for i in range(0, len(manga_list), n):
+        embed = discord.Embed(title='Manga List '  + str(count) , description=('\n'.join(manga_list[i:i + n])))
+        embed_list.append(embed)
+        count = count + 1
+        #embed2 = discord.Embed(title='Manga List Cont', description=('\n'.join(manga_list[13:])))
+    message = await ctx.send(embed=embed_list[0])
+    await message.add_reaction('◀')
+    await message.add_reaction('▶')
 
-    embed = discord.Embed(title='Manga List', description=('\n'.join(manga_list)))
+    def check(reaction, user):
+        return user == ctx.author
 
-    await ctx.send(embed=embed)
+    i = 0
+    reaction = None
+
+    while True:
+        if str(reaction) == '◀':
+            if i > 0:
+                i -= 1
+                await message.edit(embed = embed_list[i])
+            elif i == 0:
+                i = len(embed_list) - 1
+                await message.edit(embed = embed_list[-1])
+        elif str(reaction) == '▶':
+            if i < len(embed_list) - 1 :
+                i += 1
+                await message.edit(embed = embed_list[i])
+            elif i == len(embed_list) - 1:
+                i = 0
+                await message.edit(embed = embed_list[0])
+        
+        try:
+            if ctx.author in pending_tasks:
+                pending_tasks[ctx.author].close()
+            pending_tasks[ctx.author] = bot.wait_for('reaction_add', timeout=60.0, check=check)
+            reaction, user =  await pending_tasks[ctx.author]
+            await message.remove_reaction(reaction, user)
+
+        except:
+            break
+    
+    await message.clear_reactions()
 
 
 @bot.command(name='addmanga')
@@ -453,7 +553,7 @@ async def add_manga(ctx, url: str=None):
 
     conn.close()
 
-
+  
 @tasks.loop(minutes=60)
 async def manga_update():
     channel = bot.get_channel(int(CHANNEL_ID2))
@@ -471,11 +571,11 @@ async def manga_update():
                     embed.set_image(url=stuff['image'])
                     await channel.send(embed=embed)
                     c.execute("UPDATE manga SET chapter = (?) WHERE link = (?) ",(stuff['chapters'],row[0]))
-                    await channel.send(stuff['title'] + ' ' + str(stuff['chapters']))
+                    await channel.send("<@&820037605457920020> " + stuff['title'] + ' ' + str(stuff['chapters']))
                     conn.commit()
+               
         else:
             print('mangadex api error')
-
     conn.close()
 
 
@@ -487,19 +587,20 @@ def parse_message(message):
     
 
 def play_next(ctx):
-    voice_client = get(bot.voice_clients, guild=ctx.guild)        
-    del music_queue[0]
-    del song_name_queue[0]
+    voice_client = get(bot.voice_clients, guild=ctx.guild)
 
-    if len(music_queue) > 1:
+    if len(music_queue) > 1:    
+        del music_queue[0]
+        del song_name_queue[0]
         voice_client.play(music_queue[0], after=lambda e: play_next(ctx))
         voice_client.is_playing()
         asyncio.run_coroutine_threadsafe(ctx.send('**Now playing:** {}'.format(song_name_queue[0])), bot.loop)
     else:
+        del music_queue[0]
+        del song_name_queue[0]
         t.sleep(90)
         if not voice_client.is_playing():
             asyncio.run_coroutine_threadsafe(voice_client.disconnect(), bot.loop)
-            asyncio.run_coroutine_threadsafe(ctx.send("Bot has been inactive. Disconnecting from voice."), bot.loop)
 
 
 bot.run(TOKEN)
