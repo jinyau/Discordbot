@@ -3,6 +3,7 @@ import asyncio
 import asyncio
 import discord
 import ffmpeg
+import json
 import matplotlib.pyplot as plt
 import os
 import pandas as pd
@@ -227,10 +228,27 @@ async def get_manga(mangadex_link):
     return None
 
 
+async def get_time(seconds):
+    seconds = int(seconds)
+    h = seconds // 3600
+    m = seconds % 3600 // 60
+    return '{:02d} hours {:02d} minutes'.format(h, m)
+
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!\n')
     #manga_update.start()
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        cooldown = await get_time(error.retry_after)
+        msg = 'You can claim again in ' + cooldown + '.'
+        await ctx.send(msg)
+    else:
+        print(error)
 
 
 @bot.event
@@ -274,6 +292,12 @@ async def on_reaction_add(reaction, user):
 async def fk_aundre(ctx):
     aundre_winter = 'I am Aundre Winter and my opinions are the worst in the world.'
     response = aundre_winter
+    await ctx.send(response)
+
+
+@bot.command(name='jordan', aliases = ['j', 'gay', 'blacked'])
+async def jordan(ctx):
+    response = 'https://media.discordapp.net/attachments/804193490241978420/811127242369138720/gayslobberkiss1.gif?width=400&height=223'
     await ctx.send(response)
 
 
@@ -626,9 +650,94 @@ async def add_manga(ctx, url: str=None):
 
     conn.close()
 
+    
+@bot.command(name='credit', aliases = ['credits'])
+async def credit(ctx):
+    credit = await account(ctx)
+
+    await ctx.send('You have ' + str(credit) + ' credits.')
+
+
+@bot.command(name='daily')
+@commands.cooldown(1,79200,commands.BucketType.member)
+async def daily(ctx):
+
+    credit = await account(ctx, 200)
+
+    await ctx.send('You added 200 credits to your account. Your total credits is ' + str(credit) + '.')
+
+@bot.command(name='leaderboard', aliases = ['lb'])
+async def leaderboard(ctx):
+    with open('credits.json', 'r') as f:
+        accounts = json.load(f)
+
+    embed = discord.Embed(title = ctx.guild.name + ' Leaderboard')
+    embed.set_thumbnail(url = ctx.guild.icon_url)
+    count = 1
+    number = 0
+    for w in sorted(accounts[str(ctx.guild.id)], key=accounts[str(ctx.guild.id)].get, reverse=True):
+        user = await bot.fetch_user(w)
+        username = user.display_name
+        if number == 0:
+            embed.add_field(name = 'Rank', value = str(count))
+            embed.add_field(name = 'Name', value = username)
+            embed.add_field(name = 'Amount', value = accounts[str(ctx.guild.id)][w])
+            number = 1
+        else:
+            embed.add_field(name = '\u200b', value = str(count))
+            embed.add_field(name = '\u200b', value = username)
+            embed.add_field(name = '\u200b', value = accounts[str(ctx.guild.id)][w])
+        count = count + 1
+        if(count>15):
+            break
+    await ctx.send(embed=embed)
+
+async def account(ctx, credit = 0):
+    with open('credits.json', 'r') as f:
+        accounts = json.load(f)
+
+    count = 0
+
+    if str(ctx.guild.id) not in accounts:
+        accounts[str(ctx.guild.id)] = {}
+    if str(ctx.author.id) not in accounts[str(ctx.guild.id)]:
+        accounts[str(ctx.guild.id)][str(ctx.author.id)] = 0
+    accounts[str(ctx.guild.id)][str(ctx.author.id)] = accounts[str(ctx.guild.id)][str(ctx.author.id)] + credit
+    count = accounts[str(ctx.guild.id)][str(ctx.author.id)]
+    with open('credits.json', 'w') as f:
+        json.dump(accounts, f)
+
+    return count
+
+
+async def withdraw(ctx, amount):
+    await account(ctx)
+
+    with open('credits.json', 'r') as f:
+        accounts = json.load(f)
+    
+    if amount > accounts[str(ctx.guild.id)][str(ctx.author.id)]:
+        amount = accounts[str(ctx.guild.id)][str(ctx.author.id)]
+        accounts[str(ctx.guild.id)][str(ctx.author.id)] = 0
+    else:
+        accounts[str(ctx.guild.id)][str(ctx.author.id)] = accounts[str(ctx.guild.id)][str(ctx.author.id)] - amount
+    
+    with open('credits.json', 'w') as f:
+        json.dump(accounts, f)
+    
+    return amount
+
 
 @bot.command(name='blackjack', aliases = ['bj'])
-async def blackjack(ctx):
+async def blackjack(ctx, bet = 0):
+    if bet!= 0:
+        amount = await withdraw(ctx, abs(bet))
+        await ctx.send('You bet ' + str(amount) + ' credits.')
+    
+
+    WIN_FLAG = None
+    GAME = True
+    mention = ctx.author.mention
     deck = Deck()
     player_hand = Hands()
     dealer_hand = Hands()
@@ -656,19 +765,19 @@ async def blackjack(ctx):
 
     if(player_hand.value() == dealer_hand.value() == 21):
         await asyncio.sleep(1)
-        embed.title =  'Tie! Both players Blackjack!'
+        embed.title =  'Tie!'
         await message.edit(embed = embed)
         embed.set_field_at(2,name='Dealer Hand', value = dealer_hand)
         embed.set_field_at(5,name='Dealer Value', value = dealer_hand.value())
-        return await message.clear_reactions()
-
-    if(player_hand.value() == 21):
+        await message.clear_reactions()
+    elif(player_hand.value() == 21):
         await asyncio.sleep(1)
         embed.title =  'You Win! Blackjack!'
         embed.set_field_at(2,name='Dealer Hand', value = dealer_hand)
         embed.set_field_at(5,name='Dealer Value', value = dealer_hand.value())
         await message.edit(embed = embed)
-        return await message.clear_reactions()
+        await message.clear_reactions()
+        WIN_FLAG = True
 
     reaction = None
 
@@ -686,14 +795,21 @@ async def blackjack(ctx):
             if(dealer_hand.value()>player_hand.value() and dealer_hand.value()>=17):
                     embed.title = 'Dealer Wins. You Lose!'
                     await message.edit(embed=embed)
-                    await message.clear_reactions()
+                    WIN_FLAG = False
+                    GAME = False
                     break
-            if(dealer_hand.value()==player_hand.value and dealer_hand.value()>=17):
+            if(dealer_hand.value()==player_hand.value() and dealer_hand.value()>=17):
                     embed.title = 'Draw.'
                     await message.edit(embed=embed)
-                    await message.clear_reactions()
+                    GAME = False
                     break
-            while(dealer_hand.value()<=17 or dealer_hand.value()<player_hand.value()):
+            if(dealer_hand.value()<player_hand.value() and dealer_hand.value()>=17):
+                    embed.title = 'Player Wins!'
+                    await message.edit(embed=embed)
+                    WIN_FLAG = True                    
+                    GAME = False  
+                    break
+            while(dealer_hand.value()<17):
                 await asyncio.sleep(1)
                 dealer_hand.to_hand(deck.draw())
                 embed.set_field_at(2,name='Dealer Hand', value = dealer_hand)
@@ -702,28 +818,49 @@ async def blackjack(ctx):
                 if(dealer_hand.value()==player_hand.value() and dealer_hand.value()>=17):
                     embed.title = 'Draw.'
                     await message.edit(embed=embed)
-                    await message.clear_reactions()
+                    GAME = False
                     break
                 if(dealer_hand.value()>21):
                     embed.title = 'Dealer bust. You Win!'
                     await message.edit(embed=embed)
-                    await message.clear_reactions()
+                    WIN_FLAG = True
+                    GAME = False
                     break
                 if(dealer_hand.value()>player_hand.value() and dealer_hand.value()>=17):
                     embed.title = 'Dealer Wins. You Lose!'
                     await message.edit(embed=embed)
-                    await message.clear_reactions()
+                    WIN_FLAG = False
+                    GAME = False
+                    break
+                if(dealer_hand.value()<player_hand.value() and dealer_hand.value()>=17):
+                    embed.title = 'Player Wins!'
+                    await message.edit(embed=embed)
+                    WIN_FLAG = True
+                    GAME = False
                     break
         if player_hand.value() > 21:
             embed.title = 'You Lose! Bust!'
             await message.edit(embed=embed)
+            WIN_FLAG = False
+            GAME = False
             break
         if player_hand.value() == 21:
             embed.title = '''Dealer's turn.'''
             embed.set_field_at(2,name='Dealer Hand', value = dealer_hand)
             embed.set_field_at(5,name='Dealer Value', value = dealer_hand.value())
             await message.edit(embed=embed)
-            while(dealer_hand.value()<17 or dealer_hand.value()<player_hand.value()):
+            if(dealer_hand.value()<player_hand.value() and dealer_hand.value()>=17):
+                embed.title = 'You win!'
+                await message.edit(embed=embed)
+                WIN_FLAG = True
+                GAME = False
+                break
+            if(dealer_hand.value()==player_hand.value()):
+                embed.title = 'Draw.'
+                await message.edit(embed=embed)
+                GAME = False
+                break
+            while(dealer_hand.value()<17):
                 await asyncio.sleep(1)
                 dealer_hand.to_hand(deck.draw())
                 embed.set_field_at(2,name='Dealer Hand', value = dealer_hand)
@@ -732,13 +869,22 @@ async def blackjack(ctx):
                 if(dealer_hand.value()==player_hand.value()):
                     embed.title = 'Draw.'
                     await message.edit(embed=embed)
-                    await message.clear_reactions()
+                    GAME = False
                     break
                 if(dealer_hand.value()>21):
                     embed.title = 'Dealer bust. You Win!'
                     await message.edit(embed=embed)
-                    await message.clear_reactions()
+                    WIN_FLAG = True
+                    GAME = False    
                     break
+                if(dealer_hand.value()<player_hand.value() and dealer_hand.value()>=17):
+                    embed.title = 'Player Wins!'
+                    await message.edit(embed=embed)
+                    WIN_FLAG = True
+                    GAME = False
+                    break
+        if not GAME:
+            break
 
         try:
             reaction, user =  await bot.wait_for('reaction_add', timeout=30.0, check=check)
@@ -746,8 +892,21 @@ async def blackjack(ctx):
 
         except:
             break
-    
+
     await message.clear_reactions()
+    if(bet!=0):
+        mention = ctx.author.mention
+        if(WIN_FLAG):
+            winnings = 2 * amount
+            account_balance = await account(ctx,winnings)
+            await ctx.send(mention + ' You won ' + str(winnings) +  ' credits. Your total credits is ' + str(account_balance) + '.')
+        elif WIN_FLAG is False:
+            account_balance = await account(ctx)
+            await ctx.send(mention + ' You lost ' + str(amount) +' credits. Your total credits is ' + str(account_balance) + '.')
+        else:
+            winnings = amount
+            account_balance = await account(ctx,winnings)
+            await ctx.send(mention + ' Draw. Your total credits is ' + str(account_balance) + '.')
 
 
 @tasks.loop(minutes=60)
@@ -801,6 +960,7 @@ def play_next(ctx):
         if not voice_client.is_playing() and voice_client.is_connected():
             asyncio.run_coroutine_threadsafe(voice_client.disconnect(), bot.loop)
             asyncio.run_coroutine_threadsafe(ctx.send('Disconnecting from voice due to inactivity.'), bot.loop)
+
 
 
 bot.run(TOKEN)
