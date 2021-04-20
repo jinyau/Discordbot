@@ -23,6 +23,7 @@ Hosted on an AWS linux server. Wrote the bot to practice python.
     - !daily - gives 200 credits to the user
     - !credit - shows how many credits you have
     - !blackjack '*# of points*' - input a number to bet that many points.
+    - sending messages will yield 5 credits with a 2 minunte cooldown for messages that can yield credits.
 5. Miscellaneous 
     - !stock - Look up a stock with its ticker name. Displays final adjusted call from a 1 year period. !stock 'ticker'
     - !blackjack - Simulate a game of blackjack. Uses reactions to control and discord embeds as the display.

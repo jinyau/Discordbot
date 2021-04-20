@@ -89,6 +89,7 @@ song_name_queue = defaultdict(list)
 
 pending_tasks = dict()
 
+cd = commands.CooldownMapping.from_cooldown(1.0, 120, commands.BucketType.member)
 
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
@@ -128,7 +129,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 if(count == 1 and MUSIC_FLAG):
                     return 0
             for i in data['entries']:
-                example = i
                 URL = i['formats'][0]['url']
                 player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
                 music_queue[ctx.guild.id].append(player)
@@ -264,7 +264,28 @@ async def on_message(message):
         response = 'Deleted from ' + message.author.name + ' in ' + message.channel.name + ':\n' + message.content
         await channel.send(content=response)
 
+    ratelimit = ratelimit_check(message)
+    guild_id = str(message.guild.id)
+    user_id = str(message.author.id)
+
+    if ratelimit is None:
+        with open('credits.json', 'r') as f:
+            accounts = json.load(f)
+            if guild_id not in accounts:
+                accounts[guild_id] = {}
+            if user_id not in accounts[guild_id]:
+                accounts[guild_id][user_id] = 0
+            accounts[guild_id][user_id] += 5
+        with open('credits.json', 'w') as f:
+                json.dump(accounts, f)
+            
+                        
     await bot.process_commands(message)
+
+
+def ratelimit_check(message):
+    bucket = cd.get_bucket(message)
+    return bucket.update_rate_limit()
 
 
 @bot.event
@@ -292,12 +313,6 @@ async def on_reaction_add(reaction, user):
 async def fk_aundre(ctx):
     aundre_winter = 'I am Aundre Winter and my opinions are the worst in the world.'
     response = aundre_winter
-    await ctx.send(response)
-
-
-@bot.command(name='jordan', aliases = ['j', 'gay', 'blacked'])
-async def jordan(ctx):
-    response = 'https://media.discordapp.net/attachments/804193490241978420/811127242369138720/gayslobberkiss1.gif?width=400&height=223'
     await ctx.send(response)
 
 
@@ -659,12 +674,12 @@ async def credit(ctx):
 
 
 @bot.command(name='daily')
-@commands.cooldown(1,79200,commands.BucketType.member)
+@commands.cooldown(1,43200,commands.BucketType.member)
 async def daily(ctx):
 
-    credit = await account(ctx, 200)
+    credit = await account(ctx, 500)
 
-    await ctx.send('You added 200 credits to your account. Your total credits is ' + str(credit) + '.')
+    await ctx.send('You added 500 credits to your account. Your total credits is ' + str(credit) + '.')
 
 @bot.command(name='leaderboard', aliases = ['lb'])
 async def leaderboard(ctx):
@@ -673,24 +688,80 @@ async def leaderboard(ctx):
 
     embed = discord.Embed(title = ctx.guild.name + ' Leaderboard')
     embed.set_thumbnail(url = ctx.guild.icon_url)
+    embed_list = []
     count = 1
     number = 0
-    for w in sorted(accounts[str(ctx.guild.id)], key=accounts[str(ctx.guild.id)].get, reverse=True):
-        user = await bot.fetch_user(w)
-        username = user.display_name
-        if number == 0:
-            embed.add_field(name = 'Rank', value = str(count))
-            embed.add_field(name = 'Name', value = username)
-            embed.add_field(name = 'Amount', value = accounts[str(ctx.guild.id)][w])
-            number = 1
-        else:
-            embed.add_field(name = '\u200b', value = str(count))
-            embed.add_field(name = '\u200b', value = username)
-            embed.add_field(name = '\u200b', value = accounts[str(ctx.guild.id)][w])
-        count = count + 1
-        if(count>15):
-            break
-    await ctx.send(embed=embed)
+    field_count = 0
+    async with ctx.typing():
+        for w in sorted(accounts[str(ctx.guild.id)], key=accounts[str(ctx.guild.id)].get, reverse=True):
+            try:
+                user = await bot.fetch_user(w)
+                username = user.display_name
+    
+                if number == 0:
+                    embed.add_field(name = 'Rank', value = str(count))
+                    embed.add_field(name = 'Name', value = username)
+                    embed.add_field(name = 'Amount', value = accounts[str(ctx.guild.id)][w])
+                    number = 1
+                else:
+                    embed.add_field(name = '\u200b', value = str(count))
+                    embed.add_field(name = '\u200b', value = username)
+                    embed.add_field(name = '\u200b', value = accounts[str(ctx.guild.id)][w])
+                field_count = field_count + 3
+                count = count + 1
+                if(field_count % 24 == 0):
+                    embed_list.append(embed)
+                    embed = ''
+                    embed = discord.Embed(title = ctx.guild.name + ' Leaderboard')
+                    embed.set_thumbnail(url = ctx.guild.icon_url)
+            except:
+                pass
+            
+    if(field_count % 24 != 0):
+        embed_list.append(embed)
+    
+    if len(embed_list) == 1:
+        return await ctx.send(embed=embed_list[0])
+    else:
+        message = await ctx.send(embed=embed_list[0])
+        await message.add_reaction('◀')
+        await message.add_reaction('▶')
+
+        def check(reaction, user):
+            return user == ctx.author and reaction.message.id == message.id
+
+        i = 0
+        reaction = None
+
+        while True:
+            if str(reaction) == '◀':
+                if i > 0:
+                    i -= 1
+                    await message.edit(embed = embed_list[i])
+                elif i == 0:
+                    i = len(embed_list) - 1
+                    await message.edit(embed = embed_list[-1])
+            elif str(reaction) == '▶':
+                if i < len(embed_list) - 1 :
+                    i += 1
+                    await message.edit(embed = embed_list[i])
+                elif i == len(embed_list) - 1:
+                    i = 0
+                    await message.edit(embed = embed_list[0])
+            
+            try:
+                # if ctx.author in pending_tasks:
+                #     pending_tasks[ctx.author].close()
+                # pending_tasks[ctx.author] = bot.wait_for('reaction_add', timeout=60.0, check=check)
+                # reaction, user =  await pending_tasks[ctx.author]
+                reaction, user = await bot.wait_for('reaction_add', timeout = 30.0, check = check)
+                await message.remove_reaction(reaction, user)
+
+            except:
+                break
+        
+        await message.clear_reactions()
+    
 
 async def account(ctx, credit = 0):
     with open('credits.json', 'r') as f:
@@ -891,6 +962,7 @@ async def blackjack(ctx, bet = 0):
             await message.remove_reaction(reaction, user)
 
         except:
+            WIN_FLAG = False
             break
 
     await message.clear_reactions()
@@ -956,7 +1028,7 @@ def play_next(ctx):
             del song_name_queue[ctx.guild.id][0]
         except:
             pass
-        t.sleep(5)
+        t.sleep(30)
         if not voice_client.is_playing() and voice_client.is_connected():
             asyncio.run_coroutine_threadsafe(voice_client.disconnect(), bot.loop)
             asyncio.run_coroutine_threadsafe(ctx.send('Disconnecting from voice due to inactivity.'), bot.loop)
