@@ -41,7 +41,6 @@ bot = commands.Bot(command_prefix = '!', intents=intents)
 
 banned_words = ['boruto', 'ボルト', 'ぼると', 'b0ruto', 'b0rut0', 'borut0', 'ボuルzaトmaki', 'oturob', 'bouzarumatoki', '8oruto', '80ruto', '8orut0', '80rut0']
 
-
 YTDL_OPTIONS = {  
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -89,6 +88,8 @@ song_name_queue = defaultdict(list)
 
 pending_tasks = dict()
 
+epoch = datetime.utcfromtimestamp(0)
+
 cd = commands.CooldownMapping.from_cooldown(1.0, 120, commands.BucketType.member)
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -114,7 +115,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             URL = data1['url'] 
             player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data1)
             music_queue[ctx.guild.id].append(player)
-            song_name_queue[ctx.guild.id].append(player.title)
+            song_name_queue[ctx.guild.id].append(player.title + ' ' + data1['webpage_url'])
             MUSIC_FLAG = True
             voice.play(music_queue[ctx.guild.id][0], after=lambda e: play_next(ctx))
             await ctx.send('**Now playing:** {}'.format(song_name_queue[ctx.guild.id][0]))
@@ -129,10 +130,11 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 if(count == 1 and MUSIC_FLAG):
                     return 0
             for i in data['entries']:
+                example = i
                 URL = i['formats'][0]['url']
                 player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
                 music_queue[ctx.guild.id].append(player)
-                song_name_queue[ctx.guild.id].append(i['title'])
+                song_name_queue[ctx.guild.id].append(i['title'] + ' '  + i['webpage_url'])
                 if MUSIC_FLAG:
                     MUSIC_FLAG = False
                     music_queue[ctx.guild.id].pop()
@@ -145,7 +147,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 URL = data['url'] 
                 player = cls(discord.FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), data=data)
                 music_queue[ctx.guild.id].append(player)
-                song_name_queue[ctx.guild.id].append(player.title)
+                song_name_queue[ctx.guild.id].append(player.title + ' ' + data['webpage_url'])
                 return -1
             return count
 
@@ -247,6 +249,10 @@ async def on_command_error(ctx, error):
         cooldown = await get_time(error.retry_after)
         msg = 'You can claim again in ' + cooldown + '.'
         await ctx.send(msg)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send('Missing person to send credits to.')
+    elif isinstance(error, commands.MemberNotFound):
+        await ctx.send('Discord member not found. Use discord mentions to denote another person.')
     else:
         print(error)
 
@@ -274,8 +280,11 @@ async def on_message(message):
             if guild_id not in accounts:
                 accounts[guild_id] = {}
             if user_id not in accounts[guild_id]:
-                accounts[guild_id][user_id] = 0
-            accounts[guild_id][user_id] += 5
+                accounts[guild_id][user_id] = {}
+                accounts[guild_id][user_id]['Credits'] = 0
+                accounts[guild_id][user_id]['Total'] = 0
+            accounts[guild_id][user_id]['Credits'] = accounts[guild_id][user_id]['Credits'] + 5
+            accounts[guild_id][user_id]['Total'] = accounts[guild_id][user_id]['Total'] + 5
         with open('credits.json', 'w') as f:
                 json.dump(accounts, f)
             
@@ -331,6 +340,8 @@ async def get_anime(ctx, *, tag: str=None):
 
 @bot.command(name='play', aliases = ['p'])
 async def play(ctx, *, url: str=None):
+    global music_queue
+    global song_name_queue
     voice_state = ctx.author.voice
     if voice_state is None:
         return await ctx.send('`You need to be in a voice channel to use this command!`')
@@ -428,11 +439,41 @@ async def skip(ctx):
         await ctx.send('Nothing is queued.')
 
 
+@bot.command(name='shuffle')
+async def shuffle(ctx):
+    global music_queue
+    global song_name_queue
+    voice_state = ctx.author.voice
+    if voice_state is None:
+        return await ctx.send('`You need to be in a voice channel to use this command!`')
+    if not song_name_queue:
+        return await ctx.send('Nothing is queued right now.')
+    
+    first_index_music = music_queue[ctx.guild.id][0]
+    first_index_queue = song_name_queue[ctx.guild.id][0]
+
+    shuffled_queue = list(zip(music_queue[ctx.guild.id][1:], song_name_queue[ctx.guild.id][1:]))
+
+    random.shuffle(shuffled_queue)
+
+    music_queue[ctx.guild.id], song_name_queue[ctx.guild.id] = zip(*shuffled_queue)
+
+    music_queue[ctx.guild.id] = list(music_queue[ctx.guild.id])
+
+    song_name_queue[ctx.guild.id] = list(song_name_queue[ctx.guild.id])
+
+    music_queue[ctx.guild.id].insert(0, first_index_music)
+
+    song_name_queue[ctx.guild.id].insert(0, first_index_queue)
+
+    return await ctx.send('Music queue has been shuffled.')
+
+
 @bot.command(name='queue')
 async def queue(ctx):
     queue_list = []
     embed_list = []
-    n = 15
+    n = 10
     count = 1
     nums = map(str, range(1, len(song_name_queue[ctx.guild.id])+1))
     # output = "\n".join((x+'. '+y) for x,y in zip(nums, song_name_queue))
@@ -669,17 +710,51 @@ async def add_manga(ctx, url: str=None):
 @bot.command(name='credit', aliases = ['credits'])
 async def credit(ctx):
     credit = await account(ctx)
+    total = await account(ctx, 0, 0, True)
 
-    await ctx.send('You have ' + str(credit) + ' credits.')
+    await ctx.send('You have ' + str(credit) + ' credits. Your lifetime credits is ' + str(total) + '.')
 
+
+@bot.command(name='give')
+async def give(ctx, person : discord.Member, num_credits = 0):
+    if num_credits == 0:
+        return await ctx.send("Enter an amount.")
+        
+    if ctx.author.id == person.id:
+        return await ctx.send("Can't give credits to yourself.")
+
+    amount = await withdraw(ctx, abs(num_credits))
+
+    with open('credits.json', 'r') as f:
+        accounts = json.load(f)
+        
+    if str(ctx.guild.id) not in accounts:
+        accounts[str(ctx.guild.id)] = {}
+    if str(person.id) not in accounts[str(ctx.guild.id)]:
+        accounts[str(ctx.guild.id)][str(person.id)] = {}
+        accounts[str(ctx.guild.id)][str(person.id)]['Credits'] = 0
+        accounts[str(ctx.guild.id)][str(person.id)]['Total'] = 0
+    accounts[str(ctx.guild.id)][str(person.id)]['Credits'] = accounts[str(ctx.guild.id)][str(person.id)]['Credits'] + amount
+    accounts[str(ctx.guild.id)][str(person.id)]['Total'] = accounts[str(ctx.guild.id)][str(person.id)]['Total'] + amount
+
+    with open('credits.json', 'w') as f:
+        json.dump(accounts, f)
+    
+    await ctx.send(ctx.author.mention + ' gave ' + person.mention + ' ' + str(amount) + ' credits.')
+    
 
 @bot.command(name='daily')
 @commands.cooldown(1,43200,commands.BucketType.member)
 async def daily(ctx):
+    if ctx.guild.id == 467888425979346964:
+        credit = await account(ctx, 10000, 10000)
 
-    credit = await account(ctx, 500)
+        await ctx.send('You added 10000 credits to your account. Your total credits is ' + str(credit) + '.')
+    else:
+        credit = await account(ctx, 500, 500)
 
-    await ctx.send('You added 500 credits to your account. Your total credits is ' + str(credit) + '.')
+        await ctx.send('You added 500 credits to your account. Your total credits is ' + str(credit) + '.')
+
 
 @bot.command(name='leaderboard', aliases = ['lb'])
 async def leaderboard(ctx):
@@ -692,8 +767,11 @@ async def leaderboard(ctx):
     count = 1
     number = 0
     field_count = 0
+    new_dict = {}
+    for key in accounts[str(ctx.guild.id)]:
+        new_dict[key] = accounts[str(ctx.guild.id)][key]['Credits']
     async with ctx.typing():
-        for w in sorted(accounts[str(ctx.guild.id)], key=accounts[str(ctx.guild.id)].get, reverse=True):
+        for w in sorted(new_dict, key=new_dict.get, reverse=True):
             try:
                 user = await bot.fetch_user(w)
                 username = user.display_name
@@ -701,12 +779,12 @@ async def leaderboard(ctx):
                 if number == 0:
                     embed.add_field(name = 'Rank', value = str(count))
                     embed.add_field(name = 'Name', value = username)
-                    embed.add_field(name = 'Amount', value = accounts[str(ctx.guild.id)][w])
+                    embed.add_field(name = 'Amount', value = new_dict[w])
                     number = 1
                 else:
                     embed.add_field(name = '\u200b', value = str(count))
                     embed.add_field(name = '\u200b', value = username)
-                    embed.add_field(name = '\u200b', value = accounts[str(ctx.guild.id)][w])
+                    embed.add_field(name = '\u200b', value = new_dict[w])
                 field_count = field_count + 3
                 count = count + 1
                 if(field_count % 24 == 0):
@@ -763,7 +841,7 @@ async def leaderboard(ctx):
         await message.clear_reactions()
     
 
-async def account(ctx, credit = 0):
+async def account(ctx, credit = 0, total = 0, total_flag = False):
     with open('credits.json', 'r') as f:
         accounts = json.load(f)
 
@@ -772,13 +850,19 @@ async def account(ctx, credit = 0):
     if str(ctx.guild.id) not in accounts:
         accounts[str(ctx.guild.id)] = {}
     if str(ctx.author.id) not in accounts[str(ctx.guild.id)]:
-        accounts[str(ctx.guild.id)][str(ctx.author.id)] = 0
-    accounts[str(ctx.guild.id)][str(ctx.author.id)] = accounts[str(ctx.guild.id)][str(ctx.author.id)] + credit
-    count = accounts[str(ctx.guild.id)][str(ctx.author.id)]
+        accounts[str(ctx.guild.id)][str(ctx.author.id)] = {}
+        accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits'] = 0
+        accounts[str(ctx.guild.id)][str(ctx.author.id)]['Total'] = 0
+    accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits'] = accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits'] + credit
+    accounts[str(ctx.guild.id)][str(ctx.author.id)]['Total'] = accounts[str(ctx.guild.id)][str(ctx.author.id)]['Total'] + total
+    count = accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits']
+    total = accounts[str(ctx.guild.id)][str(ctx.author.id)]['Total']
     with open('credits.json', 'w') as f:
         json.dump(accounts, f)
-
-    return count
+    if(total_flag):
+        return total
+    else:
+        return count
 
 
 async def withdraw(ctx, amount):
@@ -787,11 +871,11 @@ async def withdraw(ctx, amount):
     with open('credits.json', 'r') as f:
         accounts = json.load(f)
     
-    if amount > accounts[str(ctx.guild.id)][str(ctx.author.id)]:
-        amount = accounts[str(ctx.guild.id)][str(ctx.author.id)]
-        accounts[str(ctx.guild.id)][str(ctx.author.id)] = 0
+    if amount > accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits']:
+        amount = accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits']
+        accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits'] = 0
     else:
-        accounts[str(ctx.guild.id)][str(ctx.author.id)] = accounts[str(ctx.guild.id)][str(ctx.author.id)] - amount
+        accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits'] = accounts[str(ctx.guild.id)][str(ctx.author.id)]['Credits'] - amount
     
     with open('credits.json', 'w') as f:
         json.dump(accounts, f)
@@ -970,7 +1054,7 @@ async def blackjack(ctx, bet = 0):
         mention = ctx.author.mention
         if(WIN_FLAG):
             winnings = 2 * amount
-            account_balance = await account(ctx,winnings)
+            account_balance = await account(ctx,winnings,amount)
             await ctx.send(mention + ' You won ' + str(winnings) +  ' credits. Your total credits is ' + str(account_balance) + '.')
         elif WIN_FLAG is False:
             account_balance = await account(ctx)
@@ -1014,6 +1098,8 @@ def parse_message(message):
     
 
 def play_next(ctx):
+    global music_queue
+    global song_name_queue
     voice_client = get(bot.voice_clients, guild=ctx.guild)
 
     if len(music_queue[ctx.guild.id]) > 1:    
@@ -1032,7 +1118,6 @@ def play_next(ctx):
         if not voice_client.is_playing() and voice_client.is_connected():
             asyncio.run_coroutine_threadsafe(voice_client.disconnect(), bot.loop)
             asyncio.run_coroutine_threadsafe(ctx.send('Disconnecting from voice due to inactivity.'), bot.loop)
-
 
 
 bot.run(TOKEN)
